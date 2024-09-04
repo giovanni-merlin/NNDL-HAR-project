@@ -49,7 +49,7 @@ def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_sha
     else:
         sampler = None
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=8)
 
     return dataloader
 
