@@ -35,7 +35,7 @@ class CSIDataset(Dataset):
         csi_data = csi_data.view(self.input_shape)
         csi_data = csi_data.permute(2, 0, 1)
 
-        label_tensor = torch.Tensor([label]).float()
+        label_tensor = torch.Tensor([label]).long()
         
         return (csi_data, label_tensor)
     
