@@ -35,7 +35,7 @@ class CSIDataset(Dataset):
         csi_data = csi_data.view(self.input_shape)
         csi_data = csi_data.permute(2, 0, 1)
 
-        label_tensor = torch.Tensor([label]).float()
+        label_tensor = torch.Tensor([label]).long()
         
         return (csi_data, label_tensor)
     
@@ -49,7 +49,7 @@ def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_sha
     else:
         sampler = None
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
     return dataloader
 
