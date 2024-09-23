@@ -73,6 +73,8 @@ def load_data_single(csi_file_t, stream_a):
     matrix_csi_single = torch.tensor(matrix_csi_single, dtype=torch.float32) #vedi che fa
     return matrix_csi_single
 
+# changed:
+# no more cache files (unused), no input_shape, changed output_shape, changed activities
 
 def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, channels_init = 1, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J'):
     """
