@@ -7,20 +7,56 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 import pickle
 import torch
+import torchaudio
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
+
 #TODO
 #ci sono vari argomenti inutilizzati che non si sa a cosa servano
 
+class DopplerTransformations:
+    def __init__(self, n_views=2):
+        self.n_views = n_views
+
+    def time_warp(self, spec, max_warp=5):
+        # Time warping simile a quanto visto
+        num_frames = spec.size(-1)
+        warp = np.random.randint(-max_warp, max_warp)
+        if warp != 0:
+            spec = torch.cat([spec[:, :, warp:], spec[:, :, :warp]], dim=-1)
+        return spec
+
+    def freq_mask(self, spec, freq_mask_param=10):
+        return torchaudio.transforms.FrequencyMasking(freq_mask_param)(spec)
+
+    def time_mask(self, spec, time_mask_param=10):
+        return torchaudio.transforms.TimeMasking(time_mask_param)(spec)
+
+    def amplitude_scaling(self, spec, scale_range=(0.8, 1.2)):
+        scale = np.random.uniform(*scale_range)
+        return spec * scale
+
+    def __call__(self, spec):
+        specs = []
+        for _ in range(self.n_views):
+            augmented_spec = spec.clone()
+            augmented_spec = self.time_warp(augmented_spec)
+            augmented_spec = self.freq_mask(augmented_spec)
+            augmented_spec = self.time_mask(augmented_spec)
+            augmented_spec = self.amplitude_scaling(augmented_spec)
+            specs.append(augmented_spec)
+        return specs
+
 
 class CSIDataset(Dataset):
-    def __init__(self, csi_matrix_files, labels_stride, stream_ant, input_shape):
+    def __init__(self, csi_matrix_files, labels_stride, stream_ant, input_shape, transform=None):
         self.csi_matrix_files = csi_matrix_files
         self.labels_stride = labels_stride
         self.stream_ant = stream_ant
         self.input_shape = input_shape
+        self.transform = transform
     
     def __len__(self):
         return len(self.csi_matrix_files)
@@ -35,22 +71,27 @@ class CSIDataset(Dataset):
         csi_data = csi_data.view(self.input_shape)
         csi_data = csi_data.permute(2, 0, 1)
 
+        # Applica la trasformazione se è definita
+        if self.transform:
+            csi_data = self.transform(csi_data)
+
         label_tensor = torch.Tensor([label]).long()
         
         return (csi_data, label_tensor)
     
 
-def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_shape, batch_size, shuffle, prefetch=True, repeat=False):
-    dataset = CSIDataset(csi_matrix_files, labels_stride, stream_ant, input_shape)
+def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_shape, batch_size, shuffle, transform=None, prefetch=True, repeat=False):
+    dataset = CSIDataset(csi_matrix_files, labels_stride, stream_ant, input_shape, transform=transform)
 
     if repeat: # this is not even used!
         sampler = torch.utils.data.RandomSampler(dataset, replacement=True)
     else:
         sampler = None
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=8)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
     return dataloader
+
 
 
 def expand_antennas(file_names, labels, num_antennas):
