@@ -362,7 +362,7 @@ def NT_Xent_loss(features_batch, temperature, mode='train'):
 
 def train_contrastive(model, device, train_loader, optimizer, lr_scheduler, epoch, loss_temperature):
     train_losses = []
-    train_top5_accs = []
+    train_top1_accs = []
 
     model.train()
     model.to(device)
@@ -379,24 +379,23 @@ def train_contrastive(model, device, train_loader, optimizer, lr_scheduler, epoc
         # Compute the loss together with the accuracy metrics, and store them in the lists above
         nce_loss, acc_top1, acc_top5 = NT_Xent_loss(features, temperature=loss_temperature)
         train_losses.append(nce_loss.item())
-        train_top5_accs.append(acc_top5.item())
+        train_top1_accs.append(acc_top1.item())
 
         # Backpropagate the loss and perform the optimization step
         optimizer.zero_grad()
         nce_loss.backward()
         optimizer.step()
 
-        print(f"Train Epoch: {epoch}, Iteration: {i}/{len(train_loader)},  \tLoss: {nce_loss.item():.6f}, \tTop1_Acc: {acc_top1.item():.6f}, \tTop5_Acc: {acc_top5.item():.6f}")
-
+    print(f"Train Epoch: {epoch},  \tLoss: {np.mean(train_losses).item():.6f}, \tTop1_Acc: {np.mean(train_top1_accs).item():.6f}")
     lr_scheduler.step()
-    return np.mean(train_losses), np.mean(train_top5_accs)
+    return np.mean(train_losses), np.mean(train_top1_accs)
 
 
 def valid_constrastive(model, device, val_loader, epoch, loss_temperature):
     model.eval()
     with torch.no_grad():
         val_losses = []
-        val_top5_accs = []
+        val_top1_accs = []
         for i, batch in enumerate(val_loader):
             imgs, _ = batch
 
@@ -409,7 +408,7 @@ def valid_constrastive(model, device, val_loader, epoch, loss_temperature):
             # Compute loss and accuracies, and store them
             nce_loss, acc_top1, acc_top5 = NT_Xent_loss(features, temperature=loss_temperature)
             val_losses.append(nce_loss.item())
-            val_top5_accs.append(acc_top5.item())
-            print(f"Valid Epoch: {epoch}, Iteration: {i}/{len(val_loader)},  \tLoss: {nce_loss.item():.6f}, \tTop1_Acc: {acc_top1.item():.6f}, \tTop5_Acc: {acc_top5.item():.6f}")
-
-    return np.mean(val_losses), np.mean(val_top5_accs)
+            val_top1_accs.append(acc_top1.item())
+            
+        print(f"Valid Epoch: {epoch},  \tLoss: {np.mean(val_losses).item():.6f}, \tTop1_Acc: {np.mean(val_top1_accs).item():.6f}")   
+    return np.mean(val_losses), np.mean(val_top1_accs)
