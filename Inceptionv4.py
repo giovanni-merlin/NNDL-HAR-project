@@ -284,7 +284,7 @@ class ReductionB(Module):
     
 class Inceptionv4(Module):
 
-    def __init__(self):
+    def __init__(self, hidden_dimension):
         super().__init__()
         self.network = Sequential(
             StemBlock(), # 40,10
@@ -307,7 +307,12 @@ class Inceptionv4(Module):
             InceptionC(1536), # 9,2
         )
         self.drop = Dropout(0.2)
-        self.classification_layer = Linear(27648, 5) # forse è un po' troppo? Ridurre la dimensione x?
+        self.classification_layer = nn.Sequential(
+            Linear(27648, 4*hidden_dimension),
+            ReLU(inplace=True),
+            Linear(4*hidden_dimension, hidden_dimension)
+        )
+        # forse è un po' troppo? Ridurre la dimensione x?
         self.apply(self._init_weights)
 
     def forward(self, x):

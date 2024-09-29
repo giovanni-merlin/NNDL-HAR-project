@@ -80,7 +80,7 @@ class CSIDataset(Dataset):
         return (csi_data, label_tensor)
     
 
-def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_shape, batch_size, shuffle, transform=None, prefetch=True, repeat=False):
+def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_shape, batch_size, shuffle, drop_last=False, transform=None, prefetch=True, repeat=False):
     dataset = CSIDataset(csi_matrix_files, labels_stride, stream_ant, input_shape, transform=transform)
 
     if repeat: # this is not even used!
@@ -88,7 +88,7 @@ def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_sha
     else:
         sampler = None
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
 
     return dataloader
 
@@ -113,6 +113,41 @@ def load_data_single(csi_file_t, stream_a):
 
     matrix_csi_single = torch.tensor(matrix_csi_single, dtype=torch.float32) #vedi che fa
     return matrix_csi_single
+
+
+def plt_confusion_matrix(number_activities, confusion_matrix, activities, name):
+    confusion_matrix_normaliz_row = np.transpose(confusion_matrix / np.sum(confusion_matrix, axis=1).reshape(-1, 1))
+    fig = plt.figure(constrained_layout=True)
+    fig.set_size_inches(5.5, 4)
+    ax = fig.add_axes((0.18, 0.15, 0.6, 0.8))
+    im1 = ax.pcolor(np.linspace(0.5, number_activities + 0.5, number_activities + 1),
+                    np.linspace(0.5, number_activities + 0.5, number_activities + 1),
+                    confusion_matrix_normaliz_row, cmap='Blues', edgecolors='black', vmin=0, vmax=1)
+    ax.set_xlabel('Actual activity', fontsize=18)
+    ax.set_xticks(np.linspace(1, number_activities, number_activities))
+    ax.set_xticklabels(labels=activities, fontsize=18)
+    ax.set_yticks(np.linspace(1, number_activities, number_activities))
+    ax.set_yticklabels(labels=activities, fontsize=18, rotation=45)
+    ax.set_ylabel('Predicted activity', fontsize=18)
+
+    for x_ax in range(confusion_matrix_normaliz_row.shape[0]):
+        for y_ax in range(confusion_matrix_normaliz_row.shape[1]):
+            col = 'k'
+            value_c = round(confusion_matrix_normaliz_row[x_ax, y_ax], 2)
+            if value_c > 0.6:
+                col = 'w'
+            if value_c > 0:
+                ax.text(y_ax + 1, x_ax + 1, '%.2f' % value_c, horizontalalignment='center',
+                        verticalalignment='center', fontsize=16, color=col)
+
+    cbar_ax = fig.add_axes([0.83, 0.15, 0.03, 0.8])
+    cbar = fig.colorbar(im1, cax=cbar_ax)
+    cbar.ax.set_ylabel('Accuracy', fontsize=18)
+    cbar.ax.tick_params(axis="y", labelsize=16)
+
+    #plt.tight_layout()
+    name_fig = './plots/cm_' + name + '.pdf'
+    plt.savefig(name_fig)
 
 # changed:
 # no more cache files (unused), no input_shape, changed output_shape, changed activities
@@ -283,3 +318,97 @@ def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_le
                                                 stream_ant_test, input_network, batch_size,
                                                 shuffle=False)
     return dataset_csi_test
+
+
+def NT_Xent_loss(features_batch, temperature, mode='train'):
+    """
+    Takes in input a features_batch tensor of shape (BatchSize * 2, feature_dim), the temperature parameter,
+    and computes the NT_Xent_loss
+    """
+
+    # Calculate cosine similarity between all possible couples of examples in the features_batch tensor
+    # Result must be a (BatchSize*2, BatchSize*2) tensor
+    # Hints:
+    # 1) Check the documentation https://pytorch.org/docs/stable/generated/torch.nn.functional.cosine_similarity.html
+    # 2) Use broadcasting!
+
+    cos_sim = F.cosine_similarity(features_batch[:,None,:], features_batch[None,:,:], dim=-1)
+
+    # Mask out cosine similarity to itself
+    self_mask = torch.eye(cos_sim.shape[0], dtype=torch.bool, device=cos_sim.device)
+    cos_sim.masked_fill_(self_mask, -9e15)
+
+    # Find the positive example, we know that it is batch_size//2 away from the original example
+    pos_mask = self_mask.roll(shifts=cos_sim.shape[0]//2, dims=0)
+
+    # NT_Xent loss
+    cos_sim = cos_sim / temperature
+
+    nll = -cos_sim[pos_mask] + torch.logsumexp(cos_sim, dim=-1)
+    nll = nll.mean()
+
+    # Get ranking position of positive example
+    comb_sim = torch.cat([cos_sim[pos_mask][:,None],  # First position positive example
+                            cos_sim.masked_fill(pos_mask, -9e15)],
+                            dim=-1)
+    sim_argsort = comb_sim.argsort(dim=-1, descending=True).argmin(dim=-1)
+
+    acc_top1 = (sim_argsort == 0).float().mean()
+    acc_top5 = (sim_argsort < 5).float().mean()
+
+    return nll, acc_top1, acc_top5
+
+
+
+def train_contrastive(model, device, train_loader, optimizer, lr_scheduler, epoch, loss_temperature):
+    train_losses = []
+    train_top1_accs = []
+
+    model.train()
+    model.to(device)
+    for i, batch in enumerate(train_loader):
+        imgs, _ = batch
+
+        # Concatenate the two images along the batch dimension, so we get a tensor of shape (BatchDim * 2, 3, 96, 96)
+        # Also remember to put the images on the GPU
+        cat_imgs = torch.cat(imgs, dim=0).to(device)
+
+        # Compute the features
+        features = model(cat_imgs)
+
+        # Compute the loss together with the accuracy metrics, and store them in the lists above
+        nce_loss, acc_top1, acc_top5 = NT_Xent_loss(features, temperature=loss_temperature)
+        train_losses.append(nce_loss.item())
+        train_top1_accs.append(acc_top1.item())
+
+        # Backpropagate the loss and perform the optimization step
+        optimizer.zero_grad()
+        nce_loss.backward()
+        optimizer.step()
+
+    print(f"Train Epoch: {epoch},  \tLoss: {np.mean(train_losses).item():.6f}, \tTop1_Acc: {np.mean(train_top1_accs).item():.6f}")
+    lr_scheduler.step()
+    return np.mean(train_losses), np.mean(train_top1_accs)
+
+
+def valid_constrastive(model, device, val_loader, epoch, loss_temperature):
+    model.eval()
+    with torch.no_grad():
+        val_losses = []
+        val_top1_accs = []
+        for i, batch in enumerate(val_loader):
+            imgs, _ = batch
+
+            # Concatenate the images
+            imgs = torch.cat(imgs, dim=0).to(device)
+
+            # Compute the features
+            features = model(imgs)
+
+            # Compute loss and accuracies, and store them
+            nce_loss, acc_top1, acc_top5 = NT_Xent_loss(features, temperature=loss_temperature)
+            val_losses.append(nce_loss.item())
+            val_top1_accs.append(acc_top1.item())
+            
+        print(f"Valid Epoch: {epoch},  \tLoss: {np.mean(val_losses).item():.6f}, \tTop1_Acc: {np.mean(val_top1_accs).item():.6f}")   
+    return np.mean(val_losses), np.mean(val_top1_accs)
