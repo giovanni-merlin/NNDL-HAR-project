@@ -39,15 +39,15 @@ class StemBlock(Module):
     def __init__(self):
         super().__init__()
         self.first_block = Sequential(
-            Conv2d_bn(in_filters=3, out_filters=32, kernel_size=3, strides=2, padding="valid"),
-            Conv2d_bn(in_filters=32, out_filters=32, kernel_size=3, strides=1, padding="valid"),
-            Conv2d_bn(in_filters=32, out_filters=64, kernel_size=3, strides=1, padding="same"),
+            Conv2d_bn(in_filters=1, out_filters=32, kernel_size=3, strides=2, padding="valid"), #(169,49)
+            Conv2d_bn(in_filters=32, out_filters=32, kernel_size=3, strides=1, padding="valid"), # 167,47
+            Conv2d_bn(in_filters=32, out_filters=64, kernel_size=3, strides=1, padding="same"), # 167,47
         )
         self.first_left = MaxPool2d(kernel_size=3, stride=2, padding=0)
-        self.first_right = Conv2d_bn(in_filters=64, out_filters=96, kernel_size=3, strides=2, padding="valid")
+        self.first_right = Conv2d_bn(in_filters=64, out_filters=96, kernel_size=3, strides=2, padding="valid") # 83,23
         self.second_left =  Sequential(
-            Conv2d_bn(in_filters=160, out_filters=64, kernel_size=1, strides=1, padding="same"),
-            Conv2d_bn(in_filters=64, out_filters=96, kernel_size=3, strides=1, padding="valid"),
+            Conv2d_bn(in_filters=160, out_filters=64, kernel_size=1, strides=1, padding="same"), # 83,23 
+            Conv2d_bn(in_filters=64, out_filters=96, kernel_size=3, strides=1, padding="valid"), # 81,21
         )
         self.second_right =  Sequential(
             Conv2d_bn(in_filters=160, out_filters=64, kernel_size=1, strides=1, padding="same"),
@@ -55,7 +55,7 @@ class StemBlock(Module):
             Conv2d_bn(in_filters=64, out_filters=64, kernel_size=(1, 7), strides=1, padding="same"),
             Conv2d_bn(in_filters=64, out_filters=96, kernel_size=3, strides=1, padding="valid"),
         )
-        self.third_left = Conv2d_bn(in_filters=192, out_filters=192, kernel_size=3, strides=2, padding="valid")
+        self.third_left = Conv2d_bn(in_filters=192, out_filters=192, kernel_size=3, strides=2, padding="valid") # 40,10
         self.third_right = MaxPool2d(kernel_size=3, stride=2, padding=0)
         self.apply(self._init_weights)
 
@@ -220,12 +220,12 @@ class ReductionA(Module):
 
     def __init__(self, in_filters):
         super().__init__()
-        self.max_pool = MaxPool2d(kernel_size=2, stride=2, padding=0)
-        self.central_block = Conv2d_bn(in_filters=in_filters, out_filters=5, kernel_size=2, strides=2, padding="valid")
+        self.max_pool = MaxPool2d(kernel_size=3, stride=2, padding=0) # 19,4
+        self.central_block = Conv2d_bn(in_filters=in_filters, out_filters=384, kernel_size=3, strides=2, padding="valid")
         self.right_block =  Sequential(
-            Conv2d_bn(in_filters=in_filters, out_filters=3, kernel_size=1, strides=1, padding="same"), 
-            Conv2d_bn(in_filters=3, out_filters=6, kernel_size=2, strides=1, padding="same"),  
-            Conv2d_bn(in_filters=6, out_filters=9, kernel_size=4, strides=2, padding=1), #for the mthe padding is same also here?!
+            Conv2d_bn(in_filters=in_filters, out_filters=192, kernel_size=1, strides=1, padding="same"), 
+            Conv2d_bn(in_filters=192, out_filters=224, kernel_size=3, strides=1, padding="same"),  
+            Conv2d_bn(in_filters=224, out_filters=256, kernel_size=3, strides=2, padding="valid"), #for the mthe padding is same also here?!
         )
         self.apply(self._init_weights)
 
@@ -244,6 +244,7 @@ class ReductionA(Module):
         x_2 = self.central_block(x)
         x_3 = self.right_block(x)
         x = torch.cat([x_1, x_2, x_3], axis=1)
+        return x
 
 # Reduction B
 
@@ -251,7 +252,7 @@ class ReductionB(Module):
 
     def __init__(self, in_filters):
         super().__init__()
-        self.max_pool = MaxPool2d(kernel_size=3, stride=2, padding=0)
+        self.max_pool = MaxPool2d(kernel_size=3, stride=2, padding=0) # 9,
         self.central_block = Sequential(
             Conv2d_bn(in_filters=in_filters, out_filters=192, kernel_size=1, strides=1, padding="same"),
             Conv2d_bn(in_filters=192, out_filters=192, kernel_size=3, strides=2, padding="valid"),
@@ -280,3 +281,53 @@ class ReductionB(Module):
         x_3 = self.right_block(x)
         x = torch.cat([x_1, x_2, x_3], axis=1)
         return x
+    
+class Inceptionv4(Module):
+
+    def __init__(self, hidden_dimension):
+        super().__init__()
+        self.network = Sequential(
+            StemBlock(), # 40,10
+            InceptionA(384),
+            InceptionA(384),
+            InceptionA(384),
+            InceptionA(384), # 40,10
+            ReductionA(384), # 19,4
+            InceptionB(1024),
+            InceptionB(1024),
+            InceptionB(1024),
+            InceptionB(1024),
+            InceptionB(1024),
+            InceptionB(1024),
+            InceptionB(1024), # 19,4
+            ZeroPad2d((0,1,0,1)), # 20,5
+            ReductionB(1024), # 9,2
+            InceptionC(1536),
+            InceptionC(1536),
+            InceptionC(1536), # 9,2
+        )
+        self.drop = Dropout(0.2)
+        self.classification_layer = nn.Sequential(
+            Linear(27648, 4*hidden_dimension),
+            ReLU(inplace=True),
+            Linear(4*hidden_dimension, hidden_dimension)
+        )
+        # forse è un po' troppo? Ridurre la dimensione x?
+        self.apply(self._init_weights)
+
+    def forward(self, x):
+        x = self.network(x)
+        x = torch.flatten(x, start_dim=1)
+        x = self.drop(x)
+        y = self.classification_layer(x)
+        return y
+
+    def _init_weights(self, module):
+        if isinstance(module, torch.nn.Linear):
+            torch.nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        if isinstance(module, torch.nn.Conv2d):
+            torch.nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                module.bias.data.zero_()
