@@ -3,6 +3,7 @@
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 import pickle
@@ -15,6 +16,13 @@ from torch.utils.data import Dataset, DataLoader
 
 #TODO
 #ci sono vari argomenti inutilizzati che non si sa a cosa servano
+
+def expand_antennas(file_names, labels, num_antennas):
+    file_names_expanded = [item for item in file_names for _ in range(num_antennas)]
+    labels_expanded = [item for item in labels for _ in range(num_antennas)]
+    stream_ant = np.tile(np.arange(num_antennas), len(labels))
+    return file_names_expanded, labels_expanded, stream_ant
+
 
 class DopplerTransformations:
     def __init__(self, n_views=2):
@@ -49,14 +57,31 @@ class DopplerTransformations:
             specs.append(augmented_spec)
         return specs
 
+def load_data_single(csi_file_t, stream_a, aggregate):
+    csi_file = csi_file_t
+    if isinstance(csi_file_t, (bytes, bytearray)):
+        csi_file = csi_file.decode() # returns a string with the path
+    with open(csi_file, "rb") as fp:  # Unpickling
+        matrix_csi = pickle.load(fp)
+        if aggregate == False:
+            matrix_csi_single = matrix_csi[stream_a, ...].T
+        elif aggregate == True:
+            matrix_csi_single = matrix_csi.T
+            
+    if len(matrix_csi_single.shape) < 3:
+        matrix_csi_single = np.expand_dims(matrix_csi_single, axis=-1)
+
+    matrix_csi_single = torch.tensor(matrix_csi_single, dtype=torch.float32) 
+    return matrix_csi_single
 
 class CSIDataset(Dataset):
-    def __init__(self, csi_matrix_files, labels_stride, stream_ant, input_shape, transform=None):
+    def __init__(self, csi_matrix_files, labels_stride, stream_ant, input_shape, transform, aggregate):
         self.csi_matrix_files = csi_matrix_files
         self.labels_stride = labels_stride
         self.stream_ant = stream_ant
         self.input_shape = input_shape
         self.transform = transform
+        self.aggregate = aggregate
     
     def __len__(self):
         return len(self.csi_matrix_files)
@@ -65,54 +90,31 @@ class CSIDataset(Dataset):
         csi_file = self.csi_matrix_files[idx]
         label = self.labels_stride[idx]
         stream = self.stream_ant[idx]
-        csi_data = load_data_single(csi_file, stream)
+        csi_data = load_data_single(csi_file, stream, self.aggregate)
         
-        # Per assicurarsi che il tensore abbia la forma corretta
-        csi_data = csi_data.view(self.input_shape)
-        csi_data = csi_data.permute(2, 0, 1)
+        # NB: maybe not necessary
+        if self.aggregate == False:
+            # Get rid of the channel dimension
+            csi_data = csi_data.view(self.input_shape)
+        
+        csi_data = csi_data.permute(2, 0, 1) # there is no batch dimension a the moment
 
         # Applica la trasformazione se è definita
         if self.transform:
-            csi_data = self.transform(csi_data)
+            csi_data = self.transform(csi_data) # it returns a LIST with the transformed spectra
 
         label_tensor = torch.Tensor([label]).long()
         
         return (csi_data, label_tensor)
     
 
-def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_shape, batch_size, shuffle, drop_last=False, transform=None, prefetch=True, repeat=False):
-    dataset = CSIDataset(csi_matrix_files, labels_stride, stream_ant, input_shape, transform=transform)
-
-    if repeat: # this is not even used!
-        sampler = torch.utils.data.RandomSampler(dataset, replacement=True)
-    else:
-        sampler = None
+def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_shape, batch_size, shuffle, transform=None, aggregate=False, drop_last=False):
+    
+    dataset = CSIDataset(csi_matrix_files, labels_stride, stream_ant, input_shape, transform, aggregate)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
 
     return dataloader
-
-
-
-def expand_antennas(file_names, labels, num_antennas):
-    file_names_expanded = [item for item in file_names for _ in range(num_antennas)]
-    labels_expanded = [item for item in labels for _ in range(num_antennas)]
-    stream_ant = np.tile(np.arange(num_antennas), len(labels))
-    return file_names_expanded, labels_expanded, stream_ant
-
-
-def load_data_single(csi_file_t, stream_a):
-    csi_file = csi_file_t
-    if isinstance(csi_file_t, (bytes, bytearray)):
-        csi_file = csi_file.decode()
-    with open(csi_file, "rb") as fp:  # Unpickling
-        matrix_csi = pickle.load(fp)
-    matrix_csi_single = matrix_csi[stream_a, ...].T
-    if len(matrix_csi_single.shape) < 3:
-        matrix_csi_single = np.expand_dims(matrix_csi_single, axis=-1)
-
-    matrix_csi_single = torch.tensor(matrix_csi_single, dtype=torch.float32) #vedi che fa
-    return matrix_csi_single
 
 
 def plt_confusion_matrix(number_activities, confusion_matrix, activities, name):
@@ -152,7 +154,7 @@ def plt_confusion_matrix(number_activities, confusion_matrix, activities, name):
 # changed:
 # no more cache files (unused), no input_shape, changed output_shape, changed activities
 
-def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, channels_init = 1, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J'):
+def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', aggregate=False):
     """
     Create the training set from the raw data.
     We can specify the input dimension, the batch size, and other things.
@@ -161,12 +163,14 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
             subdirs_init: path of the data subdirectories (str)
             feature_length_init: length along the feature dimension (height)
             sample_length_init: length along the time dimension (width)
-            channels_init: number of channels
             batch_size_init: number of samples in a batch
             num_tot_init: number of antenna * number of spatial streams
             activities_init: activities to be considered
+            aggregate: whether to aggregate the 4 channels or not
     Return: Dataloader obj
     """
+    if aggregate: channels = 4
+    else: channels = 1
 
     activities = activities_init 
     subdirs_training = subdirs_init
@@ -174,7 +178,6 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
     all_files_train = []
     sample_length = sample_length_init
     feature_length = feature_length_init
-    channels = channels_init
     num_antennas = num_tot_init
     input_network = (sample_length, feature_length, channels) # maybe better call input shape this?
     batch_size = batch_size_init
@@ -204,12 +207,12 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
 
     dataset_csi_train = create_dataset_single(file_train_selected_expanded, labels_train_selected_expanded,
                                                 stream_ant_train, input_network, batch_size,
-                                                shuffle=True)
+                                                shuffle=True, aggregate=aggregate)
     
     return dataset_csi_train
 
 
-def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, channels_init = 1, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J'):
+def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', aggregate=False):
     """
     Create the validation set from the raw data.
     We can specify the input dimension, the batch size, and other things.
@@ -222,8 +225,11 @@ def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sam
             batch_size_init: number of samples in a batch
             num_tot_init: number of antenna * number of spatial streams
             activities_init: activities to be considered
+            aggregate: whether to aggregate the 4 channels or not
     Return: Dataloader obj
     """
+    if aggregate: channels = 4
+    else: channels = 1
 
     activities = activities_init 
     subdirs_training = subdirs_init
@@ -231,7 +237,6 @@ def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sam
     all_files_val = []
     sample_length = sample_length_init
     feature_length = feature_length_init
-    channels = channels_init
     num_antennas = num_tot_init
     input_network = (sample_length, feature_length, channels) # maybe better call input shape this?
     batch_size = batch_size_init
@@ -261,11 +266,11 @@ def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sam
 
     dataset_csi_val = create_dataset_single(file_val_selected_expanded, labels_val_selected_expanded,
                                             stream_ant_val, input_network, batch_size,
-                                            shuffle=False)
+                                            shuffle=False,aggregate=aggregate)
     return dataset_csi_val
 
 
-def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, channels_init = 1, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J'):
+def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', aggregate=False):
     """
     Create the test set from the raw data.
     We can specify the input dimension, the batch size, and other things.
@@ -281,13 +286,15 @@ def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_le
     Return: Dataloader obj
     """
 
+    if aggregate: channels = 4
+    else: channels = 1
+
     activities = activities_init 
     subdirs_training = subdirs_init
     labels_test = []
     all_files_test = []
     sample_length = sample_length_init
     feature_length = feature_length_init
-    channels = channels_init
     num_antennas = num_tot_init
     input_network = (sample_length, feature_length, channels) # maybe better call input shape this?
     batch_size = batch_size_init
@@ -316,11 +323,11 @@ def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_le
 
     dataset_csi_test = create_dataset_single(file_test_selected_expanded, labels_test_selected_expanded,
                                                 stream_ant_test, input_network, batch_size,
-                                                shuffle=False)
+                                                shuffle=False, aggregate=aggregate)
     return dataset_csi_test
 
 
-def NT_Xent_loss(features_batch, temperature, mode='train'):
+def NT_Xent_self(features_batch, temperature, mode='train'):
     """
     Takes in input a features_batch tensor of shape (BatchSize * 2, feature_dim), the temperature parameter,
     and computes the NT_Xent_loss
@@ -328,11 +335,8 @@ def NT_Xent_loss(features_batch, temperature, mode='train'):
 
     # Calculate cosine similarity between all possible couples of examples in the features_batch tensor
     # Result must be a (BatchSize*2, BatchSize*2) tensor
-    # Hints:
-    # 1) Check the documentation https://pytorch.org/docs/stable/generated/torch.nn.functional.cosine_similarity.html
-    # 2) Use broadcasting!
 
-    cos_sim = F.cosine_similarity(features_batch[:,None,:], features_batch[None,:,:], dim=-1)
+    cos_sim = F.cosine_similarity(features_batch[:,None,:], features_batch[None,:,:], dim=-1) #uses broadcasting, compute similarity along the last dimension
 
     # Mask out cosine similarity to itself
     self_mask = torch.eye(cos_sim.shape[0], dtype=torch.bool, device=cos_sim.device)
@@ -358,9 +362,48 @@ def NT_Xent_loss(features_batch, temperature, mode='train'):
 
     return nll, acc_top1, acc_top5
 
+def NT_Xent_sup(features_batch, temperature):
+    """
+    Supervised implementation of the NT-Xent loss for 4 positive keys
+
+    Takes in input a features_batch tensor of shape (BatchSize * 4, feature_dim), the temperature parameter,
+    and computes the NT_Xent_loss
+    """
+
+    # Calculate cosine similarity between all possible couples of examples in the features_batch tensor
+    # Result must be a (BatchSize*4, BatchSize*4) tensor
+
+    cos_sim = F.cosine_similarity(features_batch[:, None, :], features_batch[None, :, :], dim=-1)
+
+    # Mask out cosine similarity to itself
+    self_mask = torch.eye(cos_sim.shape[0], dtype=torch.bool, device=cos_sim.device)
+    cos_sim.masked_fill_(self_mask, -9e15)
+
+    # Find the positive examples, we know that they are batch_size away from the original example
+    batch_size = features_batch.shape[0] // 4
+    pos_mask = torch.zeros_like(self_mask, device=cos_sim.device)
+    for i in range(1, 4):
+        pos_mask |= self_mask.roll(shifts=batch_size * i, dims=0)
+
+    # NT_Xent loss
+    cos_sim = cos_sim / temperature
+
+    nll = -cos_sim[pos_mask] + torch.logsumexp(cos_sim, dim=-1)
+    nll = nll.mean()
+
+    # Get ranking position of positive examples
+    comb_sim = torch.cat([cos_sim[pos_mask][:, None],  # First position positive examples
+                          cos_sim.masked_fill(pos_mask, -9e15)],
+                         dim=-1)
+    sim_argsort = comb_sim.argsort(dim=-1, descending=True).argmin(dim=-1)
+
+    acc_top1 = (sim_argsort == 0).float().mean()
+    acc_top5 = (sim_argsort < 5).float().mean()
+
+    return nll, acc_top1, acc_top5
 
 
-def train_contrastive(model, device, train_loader, optimizer, lr_scheduler, epoch, loss_temperature):
+def train_contrastive_self(model, device, train_loader, optimizer, lr_scheduler, epoch, loss_temperature):
     train_losses = []
     train_top1_accs = []
 
@@ -377,7 +420,7 @@ def train_contrastive(model, device, train_loader, optimizer, lr_scheduler, epoc
         features = model(cat_imgs)
 
         # Compute the loss together with the accuracy metrics, and store them in the lists above
-        nce_loss, acc_top1, acc_top5 = NT_Xent_loss(features, temperature=loss_temperature)
+        nce_loss, acc_top1, acc_top5 = NT_Xent_sup(features, temperature=loss_temperature)
         train_losses.append(nce_loss.item())
         train_top1_accs.append(acc_top1.item())
 
@@ -390,8 +433,8 @@ def train_contrastive(model, device, train_loader, optimizer, lr_scheduler, epoc
     lr_scheduler.step()
     return np.mean(train_losses), np.mean(train_top1_accs)
 
-
-def valid_constrastive(model, device, val_loader, epoch, loss_temperature):
+@torch.no_grad()
+def valid_constrastive_self(model, device, val_loader, epoch, loss_temperature):
     model.eval()
     with torch.no_grad():
         val_losses = []
@@ -406,7 +449,66 @@ def valid_constrastive(model, device, val_loader, epoch, loss_temperature):
             features = model(imgs)
 
             # Compute loss and accuracies, and store them
-            nce_loss, acc_top1, acc_top5 = NT_Xent_loss(features, temperature=loss_temperature)
+            nce_loss, acc_top1, acc_top5 = NT_Xent_sup(features, temperature=loss_temperature)
+            val_losses.append(nce_loss.item())
+            val_top1_accs.append(acc_top1.item())
+            
+        print(f"Valid Epoch: {epoch},  \tLoss: {np.mean(val_losses).item():.6f}, \tTop1_Acc: {np.mean(val_top1_accs).item():.6f}")   
+    return np.mean(val_losses), np.mean(val_top1_accs)
+
+
+def train_contrastive_sup(model, device, train_loader, optimizer, lr_scheduler, epoch, loss_temperature):
+    train_losses = []
+    train_top1_accs = []
+
+    model.train()
+    model.to(device)
+    for i, batch in enumerate(train_loader):
+        batch_x, batch_y = batch
+
+        # Here the input is different from the self supervised case: batch_x is not a list of two,
+        # rather a unique tensor with four channels. Therefore it has to be reshaped 
+        # TO BE CHECKED
+        
+        batch_x_resh = batch_x.reshape(-1, 1, 340, 100).to(device)
+
+        # Compute the features
+        features = model(batch_x_resh)
+
+        # Compute the loss together with the accuracy metrics, and store them in the lists above
+        nce_loss, acc_top1, acc_top5 = NT_Xent_sup(features, temperature=loss_temperature)
+        train_losses.append(nce_loss.item())
+        train_top1_accs.append(acc_top1.item())
+
+        # Backpropagate the loss and perform the optimization step
+        optimizer.zero_grad()
+        nce_loss.backward()
+        optimizer.step()
+
+    print(f"Train Epoch: {epoch},  \tLoss: {np.mean(train_losses).item():.6f}, \tTop1_Acc: {np.mean(train_top1_accs).item():.6f}")
+    lr_scheduler.step()
+    return np.mean(train_losses), np.mean(train_top1_accs)
+
+@torch.no_grad()
+def valid_constrastive_sup(model, device, val_loader, epoch, loss_temperature):
+    model.eval()
+    with torch.no_grad():
+        val_losses = []
+        val_top1_accs = []
+        for i, batch in enumerate(val_loader):
+            batch_x, batch_y = batch
+
+            # Here the input is different from the self supervised case: batch_x is not a list of two,
+            # rather a unique tensor with four channels. Therefore it has to be reshaped 
+            # TO BE CHECKED
+        
+            batch_x_resh = batch_x.reshape(-1, 1, 340, 100).to(device)
+
+            # Compute the features
+            features = model(batch_x_resh)
+
+            # Compute loss and accuracies, and store them
+            nce_loss, acc_top1, acc_top5 = NT_Xent_sup(features, temperature=loss_temperature)
             val_losses.append(nce_loss.item())
             val_top1_accs.append(acc_top1.item())
             
