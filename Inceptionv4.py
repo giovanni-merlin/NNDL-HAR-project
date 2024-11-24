@@ -307,17 +307,17 @@ class Inceptionv4(Module):
             InceptionC(1536), # 9,2
         )
         self.drop = Dropout(0.2)
-        self.classification_layer = nn.Sequential(
+        self.classification_layer = nn.Sequential(  # FFNN for SimCLR
             Linear(27648, 4*hidden_dimension),
             ReLU(inplace=True),
             Linear(4*hidden_dimension, hidden_dimension)
         )
-        # forse è un po' troppo? Ridurre la dimensione x?
         self.apply(self._init_weights)
 
     def forward(self, x):
         x = self.network(x)
-        x = torch.flatten(x, start_dim=1)
+        #x = torch.flatten(x, start_dim=1) OLD and wrong
+        x = x.reshape(x.shape[0], -1, 1536).mean(axis=1) # axis=1 ha size 9*2=18
         x = self.drop(x)
         y = self.classification_layer(x)
         return y
