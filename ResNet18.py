@@ -82,7 +82,7 @@ class ConvolutionalBlock(MainPath):
 
 class ResNet18(Module):
 
-    def __init__(self):
+    def __init__(self, hidden_dimension):
         super().__init__()
         self.network = Sequential(
             # STAGE 1
@@ -108,14 +108,15 @@ class ResNet18(Module):
 
             AvgPool2d(kernel_size=2, stride=2, ceil_mode=True) # DOWNSAMPLING 5*1?
         )
-        self.classification_layer = Linear(512, 5)
+        self.classification_layer = Linear(2560, 4*hidden_dimension)
         self.apply(self._init_weights)
 
     def forward(self, x):
         x = self.network(x)
-        x = x.reshape(x.shape[0], -1, 512).mean(axis=1) # axis=1 ha size 2560/512 = 5
-        # NB: forse si può provare anche senza fare la media alla fine
-        y = self.classification_layer(x)
+        #x = x.reshape(x.shape[0], -1, 512).mean(axis=1) # axis=1 ha size 2560/512 = 5
+        #x = x.reshape(x.shape[0], -1, 512)
+        y = t.flatten(x, start_dim=1)
+        y = self.classification_layer(y)
         return y
 
     def _init_weights(self, module):
