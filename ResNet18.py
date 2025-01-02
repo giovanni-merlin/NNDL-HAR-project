@@ -82,7 +82,7 @@ class ConvolutionalBlock(MainPath):
 
 class ResNet18(Module):
 
-    def __init__(self):
+    def __init__(self, hidden_dimension):
         super().__init__()
         self.network = Sequential(
             # STAGE 1
@@ -90,7 +90,7 @@ class ResNet18(Module):
             BatchNorm2d(64), # CHECK: MUST BE APPLIED TO THE CHANNEL AXIS
             MaxPool2d(kernel_size=3, stride=2), # DOWNSAMPLING 83*23
             # STAGE 2
-            ConvolutionalBlock(64, [64, 64], stride=1), # DOWNSAMPLING
+            ConvolutionalBlock(64, [64, 64], stride=1), # DOWNSAMPLING 
             IdentityBlock(64, [64, 64]),
             # STAGE 3
             ConvolutionalBlock(64, [128, 128]), # DOWNSAMPLING
@@ -102,20 +102,20 @@ class ResNet18(Module):
             IdentityBlock(256, [256, 256]),
             ZeroPad2d((0,1,0,1)), # UPSAMPLING
             # STAGE 5
-            ConvolutionalBlock(256, [512, 512]), # DOWNSAMPLING
+            ConvolutionalBlock(256, [512, 512]), # DOWNSAMPLING 9*2?
             Dropout(0.2),
             IdentityBlock(512, [512, 512]),
 
-            AvgPool2d(kernel_size=2, stride=2, ceil_mode=True) # DOWNSAMPLING
+            AvgPool2d(kernel_size=2, stride=2, ceil_mode=True) # DOWNSAMPLING 5*1?
         )
-        self.classification_layer = Linear(2560, 5)
+        self.classification_layer = Linear(2560, 4*hidden_dimension)
         self.apply(self._init_weights)
 
     def forward(self, x):
-        #print(f"out dimensions before flatten: {self.network(x).shape}")
-        # FLATTENS all dimensions except the first (batch size)
-        y = t.flatten(self.network(x), start_dim=1)
-        #print(f"out dimensions after flatten: {y.shape}")
+        x = self.network(x)
+        #x = x.reshape(x.shape[0], -1, 512).mean(axis=1) # axis=1 ha size 2560/512 = 5
+        #x = x.reshape(x.shape[0], -1, 512)
+        y = t.flatten(x, start_dim=1)
         y = self.classification_layer(y)
         return y
 
