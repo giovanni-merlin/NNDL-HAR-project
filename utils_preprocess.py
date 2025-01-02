@@ -114,8 +114,9 @@ def create_dataset_single(csi_matrix_files, labels_stride, stream_ant, input_sha
 
 # changed:
 # no more cache files (unused), no input_shape, changed output_shape, changed activities
+# TODO: add the option to do person identification! In that case, change the folder to _PI
 
-def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', transform=None, aggregate=False):
+def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', transform=None, aggregate=False, PI=0):
     """
     Create the training set from the raw data.
     We can specify the input dimension, the batch size, and other things.
@@ -127,8 +128,10 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
             batch_size_init: number of samples in a batch
             num_tot_init: number of antenna * number of spatial streams
             activities_init: activities to be considered
-            transform: whether to transform data or not. Used for contrastive learning.
-            aggregate: whether to aggregate the 4 channels or not
+            transform: whether to transform data or not. Used for contrastive training of the encoder.
+            aggregate: whether to aggregate the 4 channels or not. 
+            PI: whether to perform Person Identification task. If not 0, is the number of distinct people considered. Default is 0 (not PI)
+
     Return: Dataloader obj
     """
     if aggregate: channels = 4
@@ -143,15 +146,19 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
     num_antennas = num_tot_init
     input_network = (sample_length, feature_length, channels) # maybe better call input shape this?
     batch_size = batch_size_init
-    output_shape = len(activities.split(','))
-    labels_considered = np.arange(output_shape)
+    if PI != 0: 
+        label_file = '/labels_PI_train_antennas_'
+        labels_considered = np.arange(PI)
+    else: 
+        label_file = '/labels_train_antennas_'
+        output_shape = len(activities.split(','))
+        labels_considered = np.arange(output_shape)
 
     suffix = '.txt'
 
     for sdir in subdirs_training.split(','):
         
-        #dir_train = dir_init + sdir + '/train_antennas_' + str(activities) + '/'
-        name_labels = dir_init + sdir + '/labels_train_antennas_' + str(activities) + suffix
+        name_labels = dir_init + sdir + label_file +  str(activities) + suffix
         with open(name_labels, "rb") as fp:  # Unpickling
             labels_train.extend(pickle.load(fp))
         name_f = dir_init + sdir + '/files_train_antennas_' + str(activities) + suffix
@@ -172,7 +179,7 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
     return dataset_csi_train
 
 
-def create_valid1ation_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', transform=None, aggregate=False):
+def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', transform=None, aggregate=False, PI=0):
     """
     Create the validation set from the raw data.
     We can specify the input dimension, the batch size, and other things.
@@ -200,15 +207,19 @@ def create_valid1ation_set(dir_init, subdirs_init, feature_length_init = 100, sa
     num_antennas = num_tot_init
     input_network = (sample_length, feature_length, channels) # maybe better call input shape this?
     batch_size = batch_size_init
-    output_shape = len(activities.split(','))
-    labels_considered = np.arange(output_shape)
+    if PI != 0: 
+        label_file = '/labels_PI_val_antennas_'
+        labels_considered = np.arange(PI)
+    else: 
+        label_file = '/labels_val_antennas_'
+        output_shape = len(activities.split(','))
+        labels_considered = np.arange(output_shape)
 
     suffix = '.txt'
 
     for sdir in subdirs_training.split(','):
 
-        #dir_val = dir_init + sdir + '/val_antennas_' + str(activities) + '/'
-        name_labels = dir_init + sdir + '/labels_val_antennas_' + str(activities) + suffix
+        name_labels = dir_init + sdir + label_file + str(activities) + suffix
         with open(name_labels, "rb") as fp:  # Unpickling
             labels_val.extend(pickle.load(fp))
         name_f = dir_init + sdir + '/files_val_antennas_' + str(activities) + suffix
@@ -228,7 +239,7 @@ def create_valid1ation_set(dir_init, subdirs_init, feature_length_init = 100, sa
     return dataset_csi_val
 
 
-def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', transform=None, aggregate=False):
+def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_length_init = 340, batch_size_init = 32, num_tot_init = 4, activities_init = 'E,L,W,R,J', transform=None, aggregate=False, PI=False):
     """
     Create the test set from the raw data.
     We can specify the input dimension, the batch size, ...
@@ -256,14 +267,19 @@ def create_test_set(dir_init, subdirs_init, feature_length_init = 100, sample_le
     num_antennas = num_tot_init
     input_network = (sample_length, feature_length, channels) # maybe better call input shape this?
     batch_size = batch_size_init
-    output_shape = len(activities.split(','))
-    labels_considered = np.arange(output_shape)
+    if PI != 0: 
+        label_file = '/labels_PI_test_antennas_'
+        labels_considered = np.arange(PI)
+    else: 
+        label_file = '/labels_test_antennas_'
+        output_shape = len(activities.split(','))
+        labels_considered = np.arange(output_shape)
 
     suffix = '.txt'
 
     for sdir in subdirs_training.split(','):
-        #dir_test = dir_init + sdir + '/test_antennas_' + str(activities) + '/'
-        name_labels = dir_init + sdir + '/labels_test_antennas_' + str(activities) + suffix
+        
+        name_labels = dir_init + sdir + label_file + str(activities) + suffix
         with open(name_labels, "rb") as fp:  # Unpickling
             labels_test.extend(pickle.load(fp))
         name_f = dir_init + sdir + '/files_test_antennas_' + str(activities) + suffix

@@ -15,6 +15,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
+def create_subfolders_from_ckpt(read_path):
+    files = os.listdir(read_path)
+    ckpt_files = [f for f in files if f.endswith('.ckpt')]
+    
+    # Create subfolders for each .ckpt file
+    for ckpt_file in ckpt_files:
+        subfolder_name = os.path.splitext(ckpt_file)[0]
+        subfolder_path = os.path.join(read_path, subfolder_name)
+        
+        # Create the subfolder if it doesn't exist
+        if not os.path.exists(subfolder_path):
+            os.makedirs(subfolder_path)
+            print(f"Created subfolder: {subfolder_path}")
+        else:
+            print(f"Subfolder already exists: {subfolder_path}")
+
 # CONTRASTIVE LEARNING #
 
 def NT_Xent_self(features_batch, temperature, mode='train'):
@@ -95,9 +111,9 @@ def NT_Xent_sup(features_batch, temperature):
     idx0 = torch.tensor([np.where(row == 0)[0][0] for row in sim_argsort])
     idx1 = torch.tensor([np.where(row == 1)[0][0] for row in sim_argsort])
     idx2 = torch.tensor([np.where(row == 2)[0][0] for row in sim_argsort]) # we need the 0,0 because it returns a tuple
-    pos_indices = torch.stack((idx0, idx1, idx2), dim=-1)
+    pos_indices = torch.stack((idx0, idx1, idx2), dim=-1).cpu().numpy()
 
-    target_set = torch.tensor({0, 1, 2})
+    target_set = {0,1,2}
 
     # Check each row in the array, compute the accuracy
     acc_top1 = torch.tensor([set(row) == target_set for row in pos_indices]).float().mean()
@@ -176,7 +192,7 @@ def train_contrastive_sup(model, device, train_loader, optimizer, lr_scheduler, 
         features = model(batch_x_resh)
 
         # Compute the loss together with the accuracy metrics, and store them in the lists above
-        nce_loss, acc_top1, acc_top5 = NT_Xent_sup(features, temperature=loss_temperature)
+        nce_loss, acc_top1 = NT_Xent_sup(features, temperature=loss_temperature)
         train_losses.append(nce_loss.item())
         train_top1_accs.append(acc_top1.item())
 
@@ -208,7 +224,7 @@ def valid_constrastive_sup(model, device, val_loader, epoch, loss_temperature):
             features = model(batch_x_resh)
 
             # Compute loss and accuracies, and store them
-            nce_loss, acc_top1, acc_top5 = NT_Xent_sup(features, temperature=loss_temperature)
+            nce_loss, acc_top1 = NT_Xent_sup(features, temperature=loss_temperature)
             val_losses.append(nce_loss.item())
             val_top1_accs.append(acc_top1.item())
             
@@ -218,7 +234,7 @@ def valid_constrastive_sup(model, device, val_loader, epoch, loss_temperature):
 # TEST #
 
 # NB: should put the name as a variable so we can save and load in a consistent way?
-def train_projection(model, optimizer, train_feats_data, val_feats_data, batch_size, checkpoint_path:str, save_name:str, device, epochs=100):
+def train_projection(model, optimizer, train_feats_data, val_feats_data, batch_size, save_dir:str, save_name:str, device, epochs=100):
 
     model.to(device)
     train_loader = DataLoader(train_feats_data, batch_size=batch_size, shuffle=True, drop_last=False)
@@ -288,7 +304,7 @@ def train_projection(model, optimizer, train_feats_data, val_feats_data, batch_s
 
         if val_losses[-1] < best_val:
             iteration = epoch
-            torch.save(model.state_dict(), os.path.join(checkpoint_path, save_name))
+            torch.save(model.state_dict(), os.path.join(save_dir, save_name))
             print("Saved Model")
             best_val = val_losses[-1]
 
@@ -391,7 +407,7 @@ def merge_predictions(labels_true_test, labels_prediction_list_test, labels_pred
     return labels_pred_max_merged
 
 
-def plt_confusion_matrix(number_activities, confusion_matrix, activities, name_save=None):
+def plt_confusion_matrix(number_activities, confusion_matrix, activities, save_dir=None, save_name=None):
 
     confusion_matrix_normaliz_col = np.transpose(confusion_matrix / np.sum(confusion_matrix, axis=1).reshape(-1, 1)) #NB: prima si chiamava row, ma la normalizzazione è lungo le colonne
     fig = plt.figure(constrained_layout=True)
@@ -423,8 +439,7 @@ def plt_confusion_matrix(number_activities, confusion_matrix, activities, name_s
     cbar.ax.tick_params(axis="y", labelsize=16)
 
     #plt.tight_layout()
-    if name_save is not None:
-        if not os.path.exists('plots'):
-            os.makedirs('plots')
-        name_fig = './plots/cm_' + name_save + '.png'
+    if save_dir is not None:
+        
+        name_fig = save_dir + '/cm_' + save_name+'.png'
         plt.savefig(name_fig)
