@@ -407,7 +407,7 @@ def merge_predictions(labels_true_test, labels_prediction_list_test, labels_pred
     return labels_pred_max_merged
 
 
-def plt_confusion_matrix(number_activities, confusion_matrix, activities, save_dir=None, save_name=None):
+def plt_confusion_matrix(number_activities, confusion_matrix, lables, title, save_dir=None, save_name=None, PI=None):
 
     confusion_matrix_normaliz_col = np.transpose(confusion_matrix / np.sum(confusion_matrix, axis=1).reshape(-1, 1)) #NB: prima si chiamava row, ma la normalizzazione è lungo le colonne
     fig = plt.figure(constrained_layout=True)
@@ -416,12 +416,17 @@ def plt_confusion_matrix(number_activities, confusion_matrix, activities, save_d
     im1 = ax.pcolor(np.linspace(0.5, number_activities + 0.5, number_activities + 1),
                     np.linspace(0.5, number_activities + 0.5, number_activities + 1),
                     confusion_matrix_normaliz_col, cmap='Blues', edgecolors='black', vmin=0, vmax=1)
-    ax.set_xlabel('True activity', fontsize=18)
+    if PI:
+        ax.set_xlabel('True person', fontsize=18)
+        ax.set_ylabel('Predicted person', fontsize=18)
+    else:
+        ax.set_xlabel('True activity', fontsize=18)
+        ax.set_ylabel('Predicted activity', fontsize=18)
     ax.set_xticks(np.linspace(1, number_activities, number_activities))
-    ax.set_xticklabels(labels=activities, fontsize=18)
+    ax.set_xticklabels(labels=lables, fontsize=18)
     ax.set_yticks(np.linspace(1, number_activities, number_activities))
-    ax.set_yticklabels(labels=activities, fontsize=18, rotation=45)
-    ax.set_ylabel('Predicted activity', fontsize=18)
+    ax.set_yticklabels(labels=lables, fontsize=18, rotation=45)
+    ax.set_title(title)
 
     for x_ax in range(confusion_matrix_normaliz_col.shape[0]):
         for y_ax in range(confusion_matrix_normaliz_col.shape[1]):
@@ -440,6 +445,12 @@ def plt_confusion_matrix(number_activities, confusion_matrix, activities, save_d
 
     #plt.tight_layout()
     if save_dir is not None:
+        name_fig = os.path.join(save_dir, 'cm_' + save_name + '.png')
         
-        name_fig = save_dir + '/cm_' + save_name+'.png'
+        # Check if the file already exists and rename it if necessary
+        base_name, extension = os.path.splitext(name_fig)
+        counter = 1
+        while os.path.exists(name_fig):
+            name_fig = f"{base_name}_{counter}{extension}"
+            counter += 1
         plt.savefig(name_fig)
