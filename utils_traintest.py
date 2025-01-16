@@ -246,7 +246,7 @@ def train_projection(model, optimizer, train_feats_data, val_feats_data, batch_s
     val_accs = []
     best_val = np.inf
 
-    best_test_acc = 0
+    #best_test_acc = 0
     for epoch in range(epochs):
         losses = []
         accs = []
@@ -407,7 +407,7 @@ def merge_predictions(labels_true_test, labels_prediction_list_test, labels_pred
     return labels_pred_max_merged
 
 
-def plt_confusion_matrix(number_activities, confusion_matrix, lables, title, save_dir=None, save_name=None, PI=None):
+def plt_confusion_matrix(number_activities, confusion_matrix, lables, title, save_dir=None, save_name=None, PI=False):
 
     confusion_matrix_normaliz_col = np.transpose(confusion_matrix / np.sum(confusion_matrix, axis=1).reshape(-1, 1)) #NB: prima si chiamava row, ma la normalizzazione è lungo le colonne
     fig = plt.figure(constrained_layout=True)
