@@ -130,7 +130,8 @@ def train_contrastive_self(model, device, train_loader, optimizer, lr_scheduler,
     for i, batch in enumerate(train_loader):
         imgs, _ = batch
 
-        cat_imgs = torch.cat(imgs, dim=0).to(device)
+        cat_imgs = torch.cat(imgs, dim=0).to(device) # concatenate along the 0-th dimension (dimension of the transformation)
+        # ---> gets shape(2*)
 
         # Compute the features
         features = model(cat_imgs)
@@ -206,7 +207,7 @@ def train_contrastive_sup(model, device, train_loader, optimizer, lr_scheduler, 
     return np.mean(train_losses), np.mean(train_top1_accs)
 
 @torch.no_grad()
-def valid_constrastive_sup(model, device, val_loader, epoch, loss_temperature):
+def valid_contrastive_sup(model, device, val_loader, epoch, loss_temperature):
     model.eval()
     with torch.no_grad():
         val_losses = []

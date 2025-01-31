@@ -166,10 +166,14 @@ def create_training_set(dir_init, subdirs_init, feature_length_init = 100, sampl
             all_files_train.extend(pickle.load(fp))
 
     # create the train dataset
-    file_train_selected = [all_files_train[idx] for idx in range(len(labels_train)) if labels_train[idx] in
-                            labels_considered]
-    labels_train_selected = [labels_train[idx] for idx in range(len(labels_train)) if labels_train[idx] in
-                                labels_considered]
+    #file_train_selected = [all_files_train[idx] for idx in range(len(labels_train)) if labels_train[idx] in labels_considered]
+    #labels_train_selected = [labels_train[idx] for idx in range(len(labels_train)) if labels_train[idx] in labels_considered]
+    
+    # DEBUG
+    # consider just a portion of labels
+    step = 40
+    file_train_selected = [all_files_train[idx] for idx in np.arange(0,len(labels_train),step) if labels_train[idx] in labels_considered]
+    labels_train_selected = [labels_train[idx] for idx in np.arange(0,len(labels_train),step) if labels_train[idx] in labels_considered]
 
     file_train_selected_expanded, labels_train_selected_expanded, stream_ant_train = \
         expand_antennas(file_train_selected, labels_train_selected, num_antennas)
@@ -227,10 +231,16 @@ def create_validation_set(dir_init, subdirs_init, feature_length_init = 100, sam
             all_files_val.extend(pickle.load(fp))
 
     # create the validation dataset
-    file_val_selected = [all_files_val[idx] for idx in range(len(labels_val)) if labels_val[idx] in
-                            labels_considered]
-    labels_val_selected = [labels_val[idx] for idx in range(len(labels_val)) if labels_val[idx] in
-                            labels_considered]
+    #file_val_selected = [all_files_val[idx] for idx in range(len(labels_val)) if labels_val[idx] in
+    #                        labels_considered]
+    #labels_val_selected = [labels_val[idx] for idx in range(len(labels_val)) if labels_val[idx] in
+    #                        labels_considered]
+    
+    # DEBUG
+    # consider just a portion of labels
+    step = 40
+    file_val_selected = [all_files_val[idx] for idx in np.arange(0,len(labels_val),step) if labels_val[idx] in labels_considered]
+    labels_val_selected = [labels_val[idx] for idx in np.arange(0,len(labels_val),step) if labels_val[idx] in labels_considered]
 
     file_val_selected_expanded, labels_val_selected_expanded, stream_ant_val = \
         expand_antennas(file_val_selected, labels_val_selected, num_antennas)
