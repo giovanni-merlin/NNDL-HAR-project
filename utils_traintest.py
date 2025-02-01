@@ -130,7 +130,8 @@ def train_contrastive_self(model, device, train_loader, optimizer, lr_scheduler,
     for i, batch in enumerate(train_loader):
         imgs, _ = batch
 
-        cat_imgs = torch.cat(imgs, dim=0).to(device)
+        cat_imgs = torch.cat(imgs, dim=0).to(device) # concatenate along the 0-th dimension (dimension of the transformation)
+        # ---> gets shape(2*)
 
         # Compute the features
         features = model(cat_imgs)
@@ -179,17 +180,18 @@ def train_contrastive_sup(model, device, train_loader, optimizer, lr_scheduler, 
 
     model.train()
     model.to(device)
-    for i, batch in enumerate(train_loader):
-        batch_x, batch_y = batch
+    for _, batch in enumerate(train_loader):
+        batch_x, _ = batch
 
         # Here the input is different from the self supervised case: batch_x is not a list of two,
-        # rather a unique tensor with four channels. Therefore it has to be reshaped 
-        # TO BE CHECKED
+        # rather a unique tensor with four channels.
         
-        batch_x_resh = batch_x.reshape(-1, 1, 340, 100).to(device)
+        #batch_x_resh = batch_x.reshape(-1, 1, 340, 100).to(device) dsnt work
+        batch_x_split = torch.split(batch_x, 1, dim=1)
+        batch_x_cat = torch.cat(batch_x_split, dim=0).to(device)
 
         # Compute the features
-        features = model(batch_x_resh)
+        features = model(batch_x_cat)
 
         # Compute the loss together with the accuracy metrics, and store them in the lists above
         nce_loss, acc_top1 = NT_Xent_sup(features, temperature=loss_temperature)
@@ -206,22 +208,23 @@ def train_contrastive_sup(model, device, train_loader, optimizer, lr_scheduler, 
     return np.mean(train_losses), np.mean(train_top1_accs)
 
 @torch.no_grad()
-def valid_constrastive_sup(model, device, val_loader, epoch, loss_temperature):
+def valid_contrastive_sup(model, device, val_loader, epoch, loss_temperature):
     model.eval()
     with torch.no_grad():
         val_losses = []
         val_top1_accs = []
-        for i, batch in enumerate(val_loader):
-            batch_x, batch_y = batch
+        for _, batch in enumerate(val_loader):
+            batch_x, _ = batch
 
             # Here the input is different from the self supervised case: batch_x is not a list of two,
-            # rather a unique tensor with four channels. Therefore it has to be reshaped 
-            # TO BE CHECKED
-        
-            batch_x_resh = batch_x.reshape(-1, 1, 340, 100).to(device)
+            # rather a unique tensor with four channels. 
+            
+            #batch_x_resh = batch_x.reshape(-1, 1, 340, 100).to(device) dsnt work
+            batch_x_split = torch.split(batch_x, 1, dim=1)
+            batch_x_cat = torch.cat(batch_x_split, dim=0).to(device)
 
             # Compute the features
-            features = model(batch_x_resh)
+            features = model(batch_x_cat)
 
             # Compute loss and accuracies, and store them
             nce_loss, acc_top1 = NT_Xent_sup(features, temperature=loss_temperature)
